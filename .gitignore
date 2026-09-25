@@ -1,0 +1,33 @@
+# Secrets and runtime state
+.env
+.env.*
+!.env.example
+bot.db
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+a__pycache__/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Logs and backups
+*.log
+backups/
+backup_*.db
+
+# Railway CLI deployments only need the secrets/Python/build ignores.
+# The sibling folder names below belong to the parent project, not here.
+AVAL_Bot_upload/
+
+
+# Local tools and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

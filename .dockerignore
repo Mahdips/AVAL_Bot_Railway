@@ -1,0 +1,32 @@
+# Railway deployment package — excludes everything the server install needs
+# (install.sh, terminal menu, systemd helper) since Railway has no systemd.
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets and state — never build into the image
+.env
+.env.*
+!.env.example
+bot.db
+*.db
+*.db-shm
+*.db-wal
+backups/
+*.log
+
+# VPS-only artifacts
+install.sh
+aval-bot-menu.sh
+AVAL_Bot_upload/
+AVAL_Bot_v1.1/
+AVAL_Bot_v1.1.zip
+run.bat
+smoke_schema.db
+NUL
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

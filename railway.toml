@@ -1,0 +1,22 @@
+# AVAL BOT — Railway deployment config
+#
+# Railway allocates ONE public port and ONE process per service (free trial).
+# The app runs Telegram polling and the web panel in a single event loop
+# (WEB_WITH_BOT=1), so no supervisor/systemd is needed.
+#
+# IMPORTANT: create a persistent volume mounted at /app/data in the Railway
+# dashboard (Settings > Volumes > Add Volume), otherwise every redeploy
+# wipes your database. See README-railway.md for step-by-step instructions.
+
+[deploy]
+WEB_WITH_BOT = "1"
+WEB_ONLY = "0"
+WEB_HOST = "0.0.0.0"
+DATABASE_FILE = "/app/data/bot.db"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# IMPORTANT: create a persistent volume mounted at /app/data in the Railway
+# dashboard (Settings > Volumes > Add Volume), otherwise every redeploy
+# wipes your database. DATABASE_FILE points at that volume, so SQLite
+# writes land inside it and survive redeployments.
