@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="README.fa.md">
+    <img alt="فارسی" src="https://img.shields.io/badge/مستندات-فارسی-red?style=for-the-badge&labelColor=1f2937">
+  </a>
+  &nbsp;
+  <a href="README.md">
+    <img alt="English" src="https://img.shields.io/badge/Docs-English-blue?style=for-the-badge&labelColor=1f2937">
+  </a>
+</p>
+
 # AVAL BOT — Telegram VPN Commerce Bot
 
 A Persian-language Telegram bot for selling VPN subscriptions, with a
