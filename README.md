@@ -181,3 +181,7 @@ ways.
 ## License
 
 Provided as-is for personal/commercial use. No warranty.
+
+---
+
+[مستندات فارسی](README.fa.md)
