@@ -63,13 +63,17 @@ In the service's **Variables** tab (or `railway variables set ...`):
 | `BOT_TOKEN` | ✅ | token from @BotFather |
 | `ADMIN_IDS` | ✅ | your Telegram numeric ID (comma-separated for multiple) |
 | `WEB_ADMIN_PASSWORD` | ✅ | password to log into the web panel |
-| `XUI_BASE_URL` | ✅ | e.g. `https://panel.example.com:2096` |
-| `XUI_USERNAME` | ✅ | 3x-ui panel login |
-| `XUI_PASSWORD` | ✅ | 3x-ui panel password |
-| `XUI_INBOUND_ID` | ✅ | the inbound id products are attached to |
+| `CARD_NUMBER` | ✅ | card number shown to buyers for manual payment |
+| `CARD_OWNER` | ✅ | card holder name |
 | `BACKUP_INTERVAL_HOURS` | ⬜ | default `12` |
 
-See [`.env.example`](.env.example) for the full list.
+Everything else has a sensible default. See [`.env.example`](.env.example)
+for the full list.
+
+> **VPN panels are configured from the bot's admin panel**, not from
+> variables — log into `/admin` after the first deploy and add your
+> 3x-ui panel(s) there (base URL, username, password). You then attach
+> each product to a panel inbound.
 
 ### 3) Create a persistent volume
 
