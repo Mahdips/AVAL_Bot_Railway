@@ -111,11 +111,35 @@ with the panel address. Send `/start` to the bot to confirm it responds.
 - **Orders** — snapshot of duration/volume at purchase time, so editing
   a product later never affects already-delivered subscriptions.
 - **Users** — wallet balance, free-test tracking, block/unblock.
-- **Backups** — every `BACKUP_INTERVAL_HOURS`, the database is zipped
-  and sent to admin Telegram; only the last 48 are kept.
+- **Backups** — a database backup is zipped and sent to admin Telegram
+  every `BACKUP_INTERVAL_HOURS` (only the last 48 are kept). The
+  **Backups** tab in the web panel lists every backup on disk with
+  **Download** and **Restore** buttons, plus an **Upload** box to restore
+  a `.db` file you saved earlier — see below.
 - **Runtime controls** — on Railway, start/stop/restart are handled by
   Railway itself. Saving a new token/password stores it; **redeploy**
   applies it.
+
+## Backup and restore
+
+Backups happen automatically and land in **two** places:
+
+1. **Telegram** — a `.db` file is sent to `ADMIN_IDS` every
+   `BACKUP_INTERVAL_HOURS` (default 12). You can also request one
+   instantly from the bot's admin menu: **💾 بک‌آپ دیتابیس**.
+2. **Persistent volume** — the same file is written to
+   `/app/data/backups/` on the Railway volume, so it survives redeploy.
+
+To restore after a problem:
+
+- Open the web panel → **💾 بک‌آپ دیتابیس** tab
+- Pick a backup and press **↩ بازیابی** (Restore), or
+- Use **⬆ آپلود و بازیابی** (Upload) to restore a `.db` file you
+  downloaded from Telegram earlier
+
+Every restore first takes a safety copy of the current database
+(`pre_restore_*.db`), so a bad restore can be undone. On Railway, apply
+the restored database with a **redeploy**.
 
 ---
 

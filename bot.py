@@ -41,8 +41,8 @@ from aiogram.types import (
 )
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from jinja2 import Template
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -167,7 +167,7 @@ WEB_ADMIN_HTML = ("""
 </body></html>
 """).replace("__CSS__", WEB_ADMIN_CSS).replace("__JS__", WEB_ADMIN_JS)
 
-WEB_NAV = [("dashboard", "نمای کلی", "🏠"), ("runtime", "کنترل Bot و تنظیمات", "⚙️"), ("panels", "زیرساخت پنل‌ها", "🌐"), ("products", "ساخت و مدیریت Config", "🛍"), ("home", "جایگذاری دکمه‌های Bot", "🧩"), ("users", "کاربران", "👥")]
+WEB_NAV = [("dashboard", "نمای کلی", "🏠"), ("runtime", "کنترل Bot و تنظیمات", "⚙️"), ("backups", "بک‌آپ دیتابیس", "💾"), ("panels", "زیرساخت پنل‌ها", "🌐"), ("products", "ساخت و مدیریت Config", "🛍"), ("home", "جایگذاری دکمه‌های Bot", "🧩"), ("users", "کاربران", "👥")]
 
 def web_render(section, title, body, request, flash=None):
     return HTMLResponse(Template(WEB_ADMIN_HTML).render(nav=WEB_NAV, section=section, title=title, body=body, flash=flash or request.query_params.get("flash") or request.cookies.get("aval_flash")))
@@ -281,6 +281,243 @@ async def web_runtime_config(request: Request):
     return RedirectResponse("/admin?section=runtime&flash=" + quote("تنظیمات ذخیره شد و سرویس‌ها برای اعمال تغییرات restart شدند."), status_code=303)
 
 
+def list_backups(limit: int = 50):
+    """لیست بک‌آپ‌های موجود را به‌ترتیب جدیدترین برمی‌گرداند."""
+
+    backup_dir = DATABASE_FILE.parent / "backups"
+    if not backup_dir.is_dir():
+        return []
+    try:
+        backups = sorted(
+            (p for p in backup_dir.glob("bot_backup_*.db") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    result = []
+    for path in backups[:limit]:
+        try:
+            result.append((path, path.stat().st_size))
+        except OSError:
+            continue
+    return result
+
+
+def restore_database_from(backup_path: Path) -> bool:
+    """دیتابیس فعلی را با یک بک‌آپ جایگزین می‌کند.
+
+    از کپی امن sqlite استفاده می‌کند: ابتدا یک کپی از دیتابیس فعلی به‌عنوان
+    بک‌آپ امنتی می‌گیرد، سپس محتوای بک‌آپ انتخاب‌شده را در دیتابیس اصلی
+    کپی می‌کند. در صورت خطا، دیتابیس اصلی دست‌نخورده می‌ماند.
+    """
+
+    if not backup_path.is_file():
+        return False
+    if not DATABASE_FILE.exists():
+        return False
+
+    safety_dir = DATABASE_FILE.parent / "backups"
+    try:
+        safety_dir.mkdir(exist_ok=True)
+        safety_path = safety_dir / f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+
+        source = sqlite3.connect(str(backup_path))
+        destination = sqlite3.connect(str(safety_path))
+        with destination:
+            source.backup(destination)
+        source.close()
+        destination.close()
+    except sqlite3.Error:
+        return False
+
+    try:
+        tmp_path = DATABASE_FILE.with_suffix(".db.restoring")
+        restore_source = sqlite3.connect(str(safety_path))
+        restore_destination = sqlite3.connect(str(tmp_path))
+        with restore_destination:
+            restore_source.backup(restore_destination)
+        restore_source.close()
+        restore_destination.close()
+
+        DATABASE_FILE.unlink()
+        tmp_path.rename(DATABASE_FILE)
+        return True
+    except (sqlite3.Error, OSError):
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+@app.get("/admin/backups")
+async def web_backups_list(request: Request):
+    if not web_guard(request):
+        return RedirectResponse("/admin", status_code=303)
+    backups = list_backups()
+    flash_text = request.query_params.get("flash", "")
+    rows_html = ""
+    for index, (path, size) in enumerate(backups, start=1):
+        size_kb = max(1, int(size / 1024))
+        rows_html += (
+            f"<tr>"
+            f"<td>{index}</td>"
+            f"<td><code>{path.name}</code></td>"
+            f"<td>{size_kb:,} KB</td>"
+            f"<td nowrap>"
+            f"<a class=\"btn\" href=\"/admin/backups/download/{path.name}\">⬇ دانلود</a> "
+            f"<form method=\"post\" action=\"/admin/backups/restore/{path.name}\" "
+            f"style=\"display:inline\" onsubmit=\"return confirm('دیتابیس با این بک‌آپ جایگزین شود؟');\">"
+            f"<button class=\"btn btn-danger\" type=\"submit\">↩ بازیابی</button>"
+            f"</form>"
+            f"</td>"
+            f"</tr>"
+        )
+    if not rows_html:
+        rows_html = (
+            "<tr><td colspan=\"4\" style=\"text-align:center;padding:24px\">"
+            "هنوز بک‌آپی ساخته نشده است. از ربات دکمهٔ «💾 بک‌آپ دیتابیس» را "
+            "بزن یا منتظر بک‌آپ خودکار بمان.</td></tr>"
+        )
+    page = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>بک‌آپ‌ها — AVAL BOT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {{ font-family: system-ui, sans-serif; background:#0f1115; color:#e5e7eb; padding:20px; }}
+  h1 {{ font-size:20px; }}
+  table {{ width:100%; border-collapse:collapse; background:#171a21; border-radius:10px; overflow:hidden; }}
+  th, td {{ padding:10px 12px; border-bottom:1px solid #23262f; text-align:right; font-size:14px; }}
+  th {{ background:#1d2029; }}
+  .btn {{ display:inline-block; padding:6px 12px; border-radius:8px; background:#2563eb; color:#fff;
+          text-decoration:none; font-size:13px; border:none; cursor:pointer; }}
+  .btn-danger {{ background:#b91c1c; }}
+  .note {{ margin-top:14px; color:#9ca3af; font-size:13px; }}
+  a.toplink {{ color:#60a5fa; }}
+  .flash {{ margin:12px 0; padding:12px 16px; background:#14532d; border-radius:8px;
+            color:#bbf7d0; font-size:14px; }}
+  .upload-box {{ margin:20px 0; padding:16px; background:#171a21; border-radius:10px; }}
+  .upload-box input[type=file] {{ margin-left:10px; }}
+</style>
+</head>
+<body>
+<h1>💾 مدیریت بک‌آپ‌ها</h1>
+<p><a class="toplink" href="/admin?section=runtime">← بازگشت به تنظیمات</a></p>
+{f'<div class="flash">{flash_text}</div>' if flash_text else ''}
+<div class="upload-box">
+  <b>آپلود بک‌آپ از سیستم:</b><br>
+  <small style="color:#9ca3af">فایلی که از تلگرام دانلود کرده‌ای (با پسوند .db) را انتخاب کن تا بازیابی شود.</small>
+  <form method="post" action="/admin/backups/upload" enctype="multipart/form-data" style="margin-top:10px">
+    <input type="file" name="file" accept=".db" required>
+    <button class="btn" type="submit">⬆ آپلود و بازیابی</button>
+  </form>
+</div>
+<table>
+<tr><th>#</th><th>فایل</th><th>حجم</th><th>عملیات</th></tr>
+{rows_html}
+</table>
+<p class="note">
+بازیابی دیتابیس: ابتدا یک کپی امنتی از دیتابیس فعلی گرفته می‌شود، سپس
+بک‌آپ انتخاب‌شده جایگزین می‌شود. برای دیدن نتیجهٔ کامل، پس از بازیابی
+سرویس را redeploy کنید.
+</p>
+</body>
+</html>"""
+    return HTMLResponse(page)
+
+
+@app.post("/admin/backups/upload")
+async def web_backup_upload(request: Request, file: UploadFile):
+    if not web_guard(request):
+        return RedirectResponse("/admin", status_code=303)
+    if not file.filename.lower().endswith(".db"):
+        message = "فقط فایل با پسوند .db قابل آپلود است."
+        return RedirectResponse(f"/admin/backups?flash={quote(message)}", status_code=303)
+    try:
+        contents = await file.read()
+        if not contents:
+            raise ValueError("empty file")
+        backup_dir = DATABASE_FILE.parent / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        name = file.filename.replace("/", "_").replace("\\", "_")
+        if ".." in name:
+            raise ValueError("bad name")
+        target = backup_dir / f"uploaded_{name}"
+        target.write_bytes(contents)
+        ok = restore_database_from(target)
+        if ok:
+            message = (
+                "بک‌آپ آپلود و بازیابی شد. برای اعمال کامل روی این پلتفرم، "
+                "سرویس را redeploy کن."
+                if IS_CONTAINER_PLATFORM
+                else "بک‌آپ آپلود و بازیابی شد؛ سرویس‌ها restart شدند."
+            )
+            if not IS_CONTAINER_PLATFORM:
+                for service_key in ("bot", "web"):
+                    try:
+                        subprocess.run(
+                            build_service_command(service_key, "restart"),
+                            capture_output=True,
+                            timeout=20,
+                        )
+                    except (OSError, subprocess.SubprocessTimeoutExpired):
+                        pass
+        else:
+            message = "فایل آپلود شد ولی معتبر نبود یا بازیابی انجام نشد."
+    except (OSError, ValueError):
+        message = "آپلود فایل ناموفق بود."
+    return RedirectResponse(f"/admin/backups?flash={quote(message)}", status_code=303)
+
+
+@app.get("/admin/backups/download/{name}")
+async def web_backup_download(name: str, request: Request):
+    if not web_guard(request):
+        return RedirectResponse("/admin", status_code=303)
+    if "/" in name or "\\" in name or ".." in name:
+        return RedirectResponse("/admin/backups", status_code=303)
+    backup_path = DATABASE_FILE.parent / "backups" / name
+    if not backup_path.is_file():
+        return RedirectResponse("/admin/backups", status_code=303)
+    return FileResponse(
+        path=str(backup_path),
+        filename=name,
+        media_type="application/octet-stream",
+    )
+
+
+@app.post("/admin/backups/restore/{name}")
+async def web_backup_restore(name: str, request: Request):
+    if not web_guard(request):
+        return RedirectResponse("/admin", status_code=303)
+    if "/" in name or "\\" in name or ".." in name:
+        return RedirectResponse("/admin/backups", status_code=303)
+    backup_path = DATABASE_FILE.parent / "backups" / name
+    ok = restore_database_from(backup_path)
+    if ok:
+        message = (
+            "بک‌آپ بازیابی شد. برای اعمال کامل روی این پلتفرم، "
+            "سرویس را redeploy کن."
+            if IS_CONTAINER_PLATFORM
+            else "بک‌آپ بازیابی شد؛ سرویس‌ها restart شدند."
+        )
+        if not IS_CONTAINER_PLATFORM:
+            for service_key in ("bot", "web"):
+                try:
+                    subprocess.run(
+                        build_service_command(service_key, "restart"),
+                        capture_output=True,
+                        timeout=20,
+                    )
+                except (OSError, subprocess.SubprocessTimeoutExpired):
+                    pass
+    else:
+        message = "بازیابی انجام نشد. فایل بک‌آپ معتبر نیست یا دیتابیس در دسترس نیست."
+    return RedirectResponse(f"/admin/backups?flash={quote(message)}", status_code=303)
+
+
 @app.post("/admin/runtime/delete-bot")
 async def web_runtime_delete_bot(request: Request):
     if not web_guard(request):
@@ -302,6 +539,9 @@ async def web_admin(request: Request):
     section=request.query_params.get("section","dashboard")
     connection=get_db()
     stats={"users":connection.execute("select count(*) from users").fetchone()[0],"products":connection.execute("select count(*) from products where active=1 and category_id is not null").fetchone()[0],"panels":connection.execute("select count(*) from xui_panels where active=1").fetchone()[0],"orders":connection.execute("select count(*) from orders where status='approved'").fetchone()[0]}
+    if section=="backups":
+        # The backup manager has its own page/routes; redirect there.
+        return RedirectResponse("/admin/backups", status_code=303)
     if section=="runtime":
         service_rows = []
         for service_key, service_label in (("bot", "ربات تلگرام"), ("web", "وب‌پنل")):
@@ -4666,7 +4906,10 @@ def create_database_backup() -> Path:
 
     if not DATABASE_FILE.exists():
         return None
-    backup_dir = BASE_DIR / "backups"
+    # Store backups next to the database so they live on the persistent
+    # volume on Railway (and survive redeploy) instead of inside the app
+    # tree, which is ephemeral.
+    backup_dir = DATABASE_FILE.parent / "backups"
     backup_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
